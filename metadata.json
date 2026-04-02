@@ -1,0 +1,5 @@
+{
+  "name": "Dice Master 7",
+  "description": "A three-gate dice game: bet on total = 7, total < 7, or total > 7. Payout is 5.8x for exact 7 and 2.3x for <7 or >7.",
+  "requestFramePermissions": []
+}
