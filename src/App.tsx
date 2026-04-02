@@ -75,6 +75,8 @@ export default function App() {
   const rollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const settleTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const failsafeTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rollingLockRef = useRef(false);
 
   const clearRollTimers = () => {
     if (rollInterval.current) {
@@ -89,6 +91,16 @@ export default function App() {
       clearTimeout(failsafeTimeout.current);
       failsafeTimeout.current = null;
     }
+    if (requestTimeoutRef.current) {
+      clearTimeout(requestTimeoutRef.current);
+      requestTimeoutRef.current = null;
+    }
+  };
+
+  const finishRolling = () => {
+    clearRollTimers();
+    rollingLockRef.current = false;
+    setIsRolling(false);
   };
 
   useEffect(() => {
@@ -119,7 +131,7 @@ export default function App() {
   }, []);
 
   const handleRoll = async () => {
-    if (isRolling) return;
+    if (rollingLockRef.current || isRolling) return;
     if (betAmount > balance) {
       setError("Số dư không đủ!");
       return;
@@ -129,6 +141,7 @@ export default function App() {
       return;
     }
 
+    rollingLockRef.current = true;
     setError(null);
     setIsRolling(true);
     setLastResult(null);
@@ -144,14 +157,13 @@ export default function App() {
 
     // Failsafe: force-stop rolling if anything goes wrong asynchronously.
     failsafeTimeout.current = setTimeout(() => {
-      clearRollTimers();
-      setIsRolling(false);
+      finishRolling();
       setError('Kết nối chậm hoặc bị gián đoạn, vui lòng thử lại.');
     }, 12000);
 
     try {
       const controller = new AbortController();
-      const requestTimeout = setTimeout(() => controller.abort(), 8000);
+      requestTimeoutRef.current = setTimeout(() => controller.abort(), 8000);
 
       const response = await fetch('/api/roll', {
         method: 'POST',
@@ -160,14 +172,17 @@ export default function App() {
         signal: controller.signal,
       });
 
-      clearTimeout(requestTimeout);
+      if (requestTimeoutRef.current) {
+        clearTimeout(requestTimeoutRef.current);
+        requestTimeoutRef.current = null;
+      }
 
       const data = await response.json();
 
       if (response.ok) {
         // Wait a bit for the animation to feel "real"
         settleTimeout.current = setTimeout(() => {
-          clearRollTimers();
+          finishRolling();
           
           const result: RollResult = {
             ...data,
@@ -180,7 +195,6 @@ export default function App() {
           setLastResult(result);
           setBalance(prev => prev - betAmount + result.payout);
           setHistory(prev => [result, ...prev]);
-          setIsRolling(false);
 
           if (result.win) {
             confetti({
@@ -195,8 +209,7 @@ export default function App() {
         throw new Error(data.error || "Lỗi khi quay xúc xắc");
       }
     } catch (err) {
-      clearRollTimers();
-      setIsRolling(false);
+      finishRolling();
       if (err instanceof Error && err.name === 'AbortError') {
         setError('Yêu cầu quá thời gian, vui lòng thử lại.');
       } else {
@@ -314,7 +327,7 @@ export default function App() {
                     {[10, 50, 100].map(amt => (
                       <button 
                         key={amt}
-                        onClick={() => setBetAmount(amt)}
+                        onClick={() => setBetAmount(prev => prev + amt)}
                         className="px-3 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs font-bold transition-colors"
                       >
                         {amt}
